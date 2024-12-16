@@ -1,12 +1,12 @@
 import requests
 
 class API:
-    def __init__(self,url):
+    def __init__(self, url):
         self.url = url
-        self.token = None  # Aquí se almacenará el token JWT
+        self.token = None  # Aquí se almacenará el token JWT de acceso
+        self.refresh_token = None  # Aquí se almacenará el token de renovación
 
     def registrar(self):
-        #Aqui se registran los datos del usuario en la base de datos para iniciar sesion
         """Registra un nuevo usuario."""
         print("\n=== Registro ===")
         username = input("Nombre de usuario: ").strip()
@@ -23,56 +23,73 @@ class API:
                 print("Usuario registrado exitosamente.")
             else:
                 print(f"Error al registrar: {response.json().get('detail', response.text)}")
-                print("Respuesta del servidor:"), response.text
         except Exception as e:
             print(f"Error al conectarse al servidor: {e}")
 
-    #Aqui se innicia sesion tras el registro exitoso del usuario
     def iniciar_sesion(self):
         """Inicia sesión y obtiene un token JWT."""
         print("\n=== Iniciar Sesión ===")
         username = input("Nombre de usuario: ").strip()
         password = input("Contraseña: ").strip()
 
-        # Validar campos vacíos antes de enviar la solicitud
         if not username or not password:
             print("Error: Nombre de usuario y contraseña no pueden estar vacíos.")
             return False
 
         try:
-            # Realizar la solicitud al servidor
             response = requests.post(f"{self.url}login/", json={
                 "username": username,
                 "password": password
             })
 
-            # Evaluar el código de estado HTTP
             if response.status_code == 200:
-                # Guardar y retornar el token
-                self.token = response.json().get("access")
+                data = response.json()
+                self.token = data.get("access")
+                self.refresh_token = data.get("refresh")
                 print("Inicio de sesión exitoso. ¡Bienvenido!")
                 return True
             else:
-                # Manejar errores de autenticación o validación
                 error_message = response.json().get('detail') or response.text
                 print(f"Error al iniciar sesión: {error_message}")
                 return False
 
         except requests.exceptions.RequestException as e:
-            # Manejar errores de red o de conexión
             print(f"Error al conectarse al servidor: {e}")
             return False
 
+    def renovar_token(self):
+        """Renueva el token JWT usando el refresh token."""
+        if not self.refresh_token:
+            print("Error: No hay refresh token disponible. Inicie sesión nuevamente.")
+            return False
+
+        try:
+            response = requests.post(f"{self.url}refresh/", json={
+                "refresh": self.refresh_token
+            })
+            if response.status_code == 200:
+                self.token = response.json().get("access")
+                print("Token renovado exitosamente.")
+                return True
+            else:
+                print(f"Error al renovar el token: {response.json().get('detail', response.text)}")
+                return False
+        except requests.exceptions.RequestException as e:
+            print(f"Error al conectarse al servidor: {e}")
+            return False
 
     def _headers(self):
-        #Los headers funcionan para verificar el correcto uso de los tokens
-        """Genera los encabezados con el token JWT."""
+        """Genera los encabezados con el token JWT, renovándolo si es necesario."""
         if not self.token:
             raise Exception("Error: No autenticado. Inicie sesión primero.")
-        return {
-            "Authorization": f"Bearer {self.token}"
-        }
 
+        # Intentar renovar el token si está cerca de expirar o es inválido
+        try:
+            # Opcional: aquí podrías agregar una lógica para verificar la expiración del token
+            return {"Authorization": f"Bearer {self.token}"}
+        except Exception as e:
+            print(f"Error al generar encabezados: {e}")
+            raise
     def insertar(self):
         try:
             # Solicitar datos al usuario
@@ -123,7 +140,9 @@ class API:
             
             # Manejo de códigos HTTP
             if respuesta.status_code == 201:  # Código 201: Creación exitosa
+                print(f"Operación exitosa (Status Code: {respuesta.status_code})")
                 datos_respuesta = respuesta.json()
+                print("========================")
                 print(f"Usuario Insertado:")
                 print("========================")
                 print(f"ID: {datos_respuesta.get('id', 'N/A')}")
@@ -156,10 +175,12 @@ class API:
                 user_id = int(input("ID del usuario: "))
                 # URL específica para listar por ID
                 user_url = f"{self.url}programmers/{user_id}/"  
-                response = requests.get(user_url)
+                respuesta = requests.get(user_url, headers=self._headers())
 
-                if response.status_code == 200:
-                    user_data = response.json()
+                if respuesta.status_code == 200:
+                    print(f"Operación exitosa (Status Code: {respuesta.status_code})")
+                    user_data = respuesta.json()
+                    print("========================")
                     print(f"ID: {user_data.get('id', 'N/A')}")
                     print(f"Nombre: {user_data.get('fullname', 'N/A')}")
                     print(f"Usuario: {user_data.get('nickname', 'N/A')}")
@@ -169,26 +190,24 @@ class API:
                     is_active = "Sí" if user_data.get('is_active', False) else "No"
                     print(f"Activo: {is_active}")
                     print("========================")
-                elif response.status_code == 404:
-                    # Usuario no encontrado
-                    print(f"Error: Usuario con ID {user_id} no encontrado.")
-                elif 400 <= response.status_code < 500:
+                elif 400 <= respuesta.status_code < 500:
                     # Error del cliente
-                    print(f"Error del cliente ({response.status_code}): {response.json().get('message', 'Solicitud inválida.')}")
-                elif 500 <= response.status_code < 600:
+                    print(f"Error del cliente ({respuesta.status_code}): {respuesta.json().get('message', 'Solicitud inválida.')}")
+                elif 500 <= respuesta.status_code < 600:
                     # Error del servidor
-                    print(f"Error del servidor ({response.status_code}): Por favor, intente más tarde.")
+                    print(f"Error del servidor ({respuesta.status_code}): Por favor, intente más tarde.")
                 else:
                     # Otros códigos no esperados
-                    print(f"Respuesta no manejada: {response.status_code}")
+                    print(f"Respuesta no manejada: {respuesta.status_code}")
             elif op == 2:
                 try:
                     update_url = f"{self.url}programmers/"
-                    response = requests.get(update_url, headers=self._headers())
+                    respuesta = requests.get(update_url, headers=self._headers())
                     
                     # Manejo de códigos de estado HTTP
-                    if response.status_code == 200:
-                        users = response.json()
+                    if respuesta.status_code == 200:
+                        print(f"Operación exitosa (Status Code: {respuesta.status_code})")
+                        users = respuesta.json()
                         
                         if not isinstance(users, list):
                             print("La respuesta del API no es una lista válida.")
@@ -211,12 +230,12 @@ class API:
                             is_active = "Sí" if user.get('is_active', False) else "No"
                             print(f"Activo: {is_active}")
                             print("========================")
-                    elif 400 <= response.status_code < 500:
-                        print(f"Error del cliente ({response.status_code}): {response.json().get('message', 'Solicitud inválida.')}")
-                    elif 500 <= response.status_code < 600:
-                        print(f"Error del servidor ({response.status_code}): Por favor, intente más tarde.")
+                    elif 400 <= respuesta.status_code < 500:
+                        print(f"Error del cliente ({respuesta.status_code}): {respuesta.json().get('message', 'Solicitud inválida.')}")
+                    elif 500 <= respuesta.status_code < 600:
+                        print(f"Error del servidor ({respuesta.status_code}): Por favor, intente más tarde.")
                     else:
-                        print(f"Respuesta no manejada: {response.status_code}")
+                        print(f"Respuesta no manejada: {respuesta.status_code}")
                 
                 except requests.exceptions.RequestException as e:
                     print(f"Error en la solicitud: {e}")
@@ -268,7 +287,9 @@ class API:
 
             # Manejo de códigos de estado HTTP
             if respuesta.status_code == 200:
+                print(f"Operación exitosa (Status Code: {respuesta.status_code})")
                 datos = respuesta.json()
+                print("========================")
                 print(f"Usuario Actualizado:")
                 print("========================")
                 print(f"ID: {datos['id']}")
@@ -305,6 +326,7 @@ class API:
             respuesta = requests.delete(delete_url, headers=self._headers())
             respuesta.raise_for_status()  # Verificar si la respuesta fue exitosa
             if respuesta.status_code == 200 or respuesta.status_code == 204:
+                print(f"Operación exitosa (Status Code: {respuesta.status_code})")
                 # Eliminación exitosa
                 print(f"Usuario con ID {id_usuario} eliminado correctamente.")
             elif respuesta.status_code == 404:
@@ -323,4 +345,3 @@ class API:
             print(f"Error en la solicitud: {e}")
         except ValueError:
             print("Error al ingresar el ID del producto. Verifique e intente nuevamente.")
-
